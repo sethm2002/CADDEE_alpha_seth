@@ -39,6 +39,9 @@ class WingGeometricQuantities:
     sweep_angle_right: csdl.Variable
     dihedral_angle_left: csdl.Variable
     dihedral_angle_right: csdl.Variable
+    toc_center: csdl.Variable
+    toc_left: csdl.Variable
+    toc_right: csdl.Variable
 
 
 class Wing(Component):
@@ -360,6 +363,15 @@ class Wing(Component):
             name=f"{self._name}_chord_stretch_b_sp_coeffs"
         )
 
+        airfoil_thickness_stretch_b_spline = lfs.Function(
+            space=self._linear_b_spline_3_dof_space, 
+            coefficients=csdl.ImplicitVariable(
+                shape=(3, ), 
+                value=np.array([-0, 0, 0])
+            ),
+            name=f"{self._name}_airfoil_thickness_stretch_b_sp_coeffs"
+        )
+
         span_stretch_b_spline = lfs.Function(
             space=self._linear_b_spline_2_dof_space,
             coefficients=csdl.ImplicitVariable(
@@ -409,6 +421,11 @@ class Wing(Component):
         chord_stretch_sectional_parameters = chord_stretch_b_spline.evaluate(
             parametric_b_spline_inputs
         )
+
+        airfoil_chord_stretch_sectional_parameters = airfoil_thickness_stretch_b_spline.evaluate(
+            parametric_b_spline_inputs
+        )
+
         span_stretch_sectional_parameters = span_stretch_b_spline.evaluate(
             parametric_b_spline_inputs
         )
@@ -433,6 +450,7 @@ class Wing(Component):
             if self.parameters.dihedral is not None:
                 sectional_parameters.add_sectional_translation(axis=2, translation=dihedral_translation_sectional_parameters)
             sectional_parameters.add_sectional_rotation(axis=1, rotation=twist_sectional_parameters)
+            sectional_parameters.add_sectional_stretch(axis=2, stretch=airfoil_chord_stretch_sectional_parameters)
         else:
             sectional_parameters.add_sectional_stretch(axis=0, stretch=chord_stretch_sectional_parameters)
             sectional_parameters.add_sectional_translation(axis=2, translation=span_stretch_sectional_parameters)
@@ -475,6 +493,7 @@ class Wing(Component):
         else:            
             parameterization_solver.add_parameter(chord_stretch_b_spline.coefficients)
             parameterization_solver.add_parameter(span_stretch_b_spline.coefficients)
+            parameterization_solver.add_parameter(airfoil_thickness_stretch_b_spline.coefficients)
             if self.parameters.sweep is not None:
                 parameterization_solver.add_parameter(sweep_translation_b_spline.coefficients)
             if self.parameters.dihedral is not None:
@@ -528,6 +547,31 @@ class Wing(Component):
             dihedral_angle_left = csdl.arcsin(qc_spanwise_left[2] / csdl.norm(qc_spanwise_left))
             dihedral_angle_right = csdl.arcsin(qc_spanwise_right[2] / csdl.norm(qc_spanwise_right))
 
+            toc = self.parameters.thickness_to_chord
+            if toc is None:
+                raise NotImplementedError("Provide thickness to chord (for now)")
+            else:
+                x_loc_toc_center = 0.7 * LE_center + 0.3 * TE_center
+                x_loc_toc_right = 0.7 * LE_right + 0.3 * TE_right
+                x_loc_toc_left = 0.7 * LE_left + 0.3 * TE_left
+
+                param_center_upper = self.geometry.project(x_loc_toc_center.value + np.array([0., 0., 0.25]), direction=np.array([0., 0., -1.]), plot=False)
+                param_center_lower = self.geometry.project(x_loc_toc_center.value - np.array([0., 0., 0.25]), direction=np.array([0., 0., 1.]), plot=False)
+                thickness_center = csdl.norm(self.geometry.evaluate(param_center_upper) - self.geometry.evaluate(param_center_lower))
+
+                param_right_upper = self.geometry.project(x_loc_toc_right.value + np.array([0., 0., 0.25]), direction=np.array([0., 0., -1.]), plot=False)
+                param_right_lower = self.geometry.project(x_loc_toc_right.value - np.array([0., 0., 0.25]), direction=np.array([0., 0., 1.]), plot=False)
+                thickness_right = csdl.norm(self.geometry.evaluate(param_right_upper) - self.geometry.evaluate(param_right_lower))
+
+                param_left_upper = self.geometry.project(x_loc_toc_left.value + np.array([0., 0., 0.25]), direction=np.array([0., 0., -1.]), plot=False)
+                param_left_lower = self.geometry.project(x_loc_toc_left.value - np.array([0., 0., 0.25]), direction=np.array([0., 0., 1.]), plot=False)
+                thickness_left = csdl.norm(self.geometry.evaluate(param_left_upper) - self.geometry.evaluate(param_left_lower))
+
+                toc_constraint_center = thickness_center / csdl.norm(center_chord)
+                toc_constraint_left = thickness_left / csdl.norm(left_tip_chord)
+                toc_constraint_right = thickness_right / csdl.norm(right_tip_chord)
+
+
 
             wing_geometric_qts = WingGeometricQuantities(
                 span=csdl.norm(span),
@@ -537,7 +581,11 @@ class Wing(Component):
                 sweep_angle_left=sweep_angle_left,
                 sweep_angle_right=sweep_angle_right,
                 dihedral_angle_left=dihedral_angle_left,
-                dihedral_angle_right=dihedral_angle_right
+                dihedral_angle_right=dihedral_angle_right,
+                toc_center=toc_constraint_center,
+                toc_left=toc_constraint_left,
+                toc_right=toc_constraint_right,
+
             )
 
         else:
@@ -615,7 +663,9 @@ class Wing(Component):
             root_chord_input = 2 * self.parameters.S_ref/((1 + taper_ratio) * span_input)
             tip_chord_left_input = root_chord_input * taper_ratio 
             tip_chord_right_input = tip_chord_left_input * 1
-        
+
+
+
         elif self.parameters.span is not None and self.parameters.AR is not None:
             if self.parameters.taper_ratio is None:
                 taper_ratio = 1.
@@ -633,8 +683,14 @@ class Wing(Component):
             tip_chord_left_input = root_chord_input * taper_ratio 
             tip_chord_right_input = tip_chord_left_input * 1
 
+        # elif self.parameters.thickness_to_chord is not None:
+        #     toc_input = self.parameters.thickness_to_chord
+
         else:
             raise NotImplementedError
+        
+        # print("self.parameters.thickness_to_chord", self.parameters.thickness_to_chord)
+        toc_input = self.parameters.thickness_to_chord
 
         # Set constraints: user input - geometric qty equivalent
         if self._orientation == "horizontal":
@@ -642,6 +698,9 @@ class Wing(Component):
             ffd_geometric_variables.add_variable(wing_geom_qts.center_chord, root_chord_input)
             ffd_geometric_variables.add_variable(wing_geom_qts.left_tip_chord, tip_chord_left_input)
             ffd_geometric_variables.add_variable(wing_geom_qts.right_tip_chord, tip_chord_right_input)
+            ffd_geometric_variables.add_variable(wing_geom_qts.toc_center, toc_input)
+            ffd_geometric_variables.add_variable(wing_geom_qts.toc_left, toc_input)
+            ffd_geometric_variables.add_variable(wing_geom_qts.toc_right, toc_input)
         else:
             ffd_geometric_variables.add_variable(wing_geom_qts.span, span_input)
             ffd_geometric_variables.add_variable(wing_geom_qts.center_chord, root_chord_input)

@@ -172,10 +172,15 @@ class Fuselage(Component):
         self.geometry.set_coefficients(geometry_coefficients)
 
         # Add rigid body translation (without FFD)
+        # rigid_body_translation = csdl.ImplicitVariable(shape=(3, ), value=0.)
+        # for function in self.geometry.functions.values():
+        #     shape = function.coefficients.shape
+        #     function.coefficients = function.coefficients + csdl.expand(rigid_body_translation, shape, action='j->ij')
         rigid_body_translation = csdl.ImplicitVariable(shape=(3, ), value=0.)
         for function in self.geometry.functions.values():
-            shape = function.coefficients.shape
-            function.coefficients = function.coefficients + csdl.expand(rigid_body_translation, shape, action='j->ij')
+           fun_coeffs = function.coefficients.reshape((-1, 3))
+           shape = fun_coeffs.shape
+           function.coefficients = fun_coeffs + csdl.expand(rigid_body_translation, shape, action='j->ij')
 
         # Add (B-spline) coefficients to parameterization solver
         if self.skip_ffd:

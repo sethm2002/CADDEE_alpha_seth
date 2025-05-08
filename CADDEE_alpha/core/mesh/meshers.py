@@ -302,7 +302,7 @@ class CamberSurface(Discretization):
         )
 
         vertical_offset_1 = csdl.expand(
-            csdl.Variable(shape=(3, ), value=np.array([0., 0., 0.25])),
+            csdl.Variable(shape=(3, ), value=np.array([0., 0., 0.05])),
             chord_surface.shape, action='k->ijk'
         )
 
@@ -629,7 +629,7 @@ def make_vlm_surface(
 
     else:
         vertical_offset_1 = csdl.expand(
-            csdl.Variable(shape=(3, ), value=np.array([0., 0., 0.25])),
+            csdl.Variable(shape=(3, ), value=np.array([0., 0., 0.05])),
             chord_surface.shape, action='k->ijk'
         )
 
@@ -696,7 +696,7 @@ def make_vlm_surface(
         )
 
         vertical_offset_1 = csdl.expand(
-            csdl.Variable(shape=(3, ), value=np.array([0., 0., 0.25])),
+            csdl.Variable(shape=(3, ), value=np.array([0., 0., 0.05])),
             chord_surface.shape, action='k->ijk'
         )
 
